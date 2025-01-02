@@ -20,23 +20,46 @@ export function VoiceContextProvider({ accessToken, children }: VoiceContextProp
   const { data: session } = useSession();
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [voiceClient, setVoiceClient] = useState<VoiceClient | null>(null);
+  const [persistentChatId, setPersistentChatId] = useState<string | null>(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('persistentChatId') : null;
+  });
 
   const updateConversationGroupId = useCallback(async (groupId: string) => {
-    if (!currentConversation?.id || !session?.user?.id) return;
-    
+    if (!session?.user?.id) return;
+
     try {
-      const response = await fetch(`/api/conversations/${currentConversation.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ humeGroupId: groupId })
-      });
-      
-      if (!response.ok) throw new Error('Failed to update conversation group ID');
-      const updatedConversation = await response.json();
-      setCurrentConversation(updatedConversation);
-      localStorage.setItem('lastChatGroupId', groupId);
+      // Store as persistent chat if none exists
+      if (!localStorage.getItem('persistentChatId')) {
+        localStorage.setItem('persistentChatId', groupId);
+        setPersistentChatId(groupId);
+      }
+
+      // Update the existing conversation if we have one
+      if (currentConversation?.id) {
+        const response = await fetch(`/api/conversations/${currentConversation.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ humeGroupId: groupId })
+        });
+
+        if (!response.ok) throw new Error('Failed to update conversation group ID');
+        const updatedConversation = await response.json();
+        setCurrentConversation(updatedConversation);
+      } else {
+        // Create a new conversation with the group ID
+        const response = await fetch('/api/conversations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ humeGroupId: groupId })
+        });
+
+        if (!response.ok) throw new Error('Failed to create conversation');
+        const newConversation = await response.json();
+        setCurrentConversation(newConversation);
+      }
     } catch (error) {
-      console.error('Failed to update conversation group ID:', error);
+      console.error('Failed to update/create conversation:', error);
+      toast.error('Failed to update conversation');
     }
   }, [currentConversation?.id, session?.user?.id]);
 
@@ -44,17 +67,18 @@ export function VoiceContextProvider({ accessToken, children }: VoiceContextProp
     if (!session?.user?.id) return null;
     
     try {
-      const lastChatGroupId = localStorage.getItem('lastChatGroupId');
-      
       const response = await fetch('/api/conversation/active', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lastChatGroupId })
+        body: JSON.stringify({ 
+          lastChatGroupId: persistentChatId 
+        })
       });
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
+
       const conversation = await response.json();
       setCurrentConversation(conversation);
 
@@ -75,7 +99,25 @@ export function VoiceContextProvider({ accessToken, children }: VoiceContextProp
       toast.error('Failed to load conversation');
       return null;
     }
-  }, [session?.user?.id, voiceClient]);
+  }, [session?.user?.id, voiceClient, persistentChatId]);
+
+  const resetConversation = useCallback(async () => {
+    localStorage.removeItem('persistentChatId');
+    setPersistentChatId(null);
+    
+    try {
+      await fetch('/api/conversation/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      await fetchActiveConversation();
+      toast.success('Started a new conversation');
+    } catch (error) {
+      console.error('Failed to reset conversation:', error);
+      toast.error('Failed to reset conversation');
+    }
+  }, [fetchActiveConversation]);
 
   const handleMessage = useCallback((message: JSONMessage) => {
     if (message.type === 'chat_metadata') {
@@ -104,36 +146,17 @@ export function VoiceContextProvider({ accessToken, children }: VoiceContextProp
     });
   }, [currentConversation, session?.user?.id, updateConversationGroupId]);
 
+  // Initialize on mount
   useEffect(() => {
     if (session?.user?.id) {
       fetchActiveConversation();
     }
   }, [session?.user?.id, fetchActiveConversation]);
 
-  useEffect(() => {
-    if (currentConversation?.humeGroupId && voiceClient) {
-      const settings = {
-        type: "session_settings",
-        custom_session_id: currentConversation.humeGroupId,
-        variables: {
-          conversation_id: currentConversation.id,
-          user_id: session?.user?.id
-        }
-      };
-
-      try {
-        voiceClient.sendSessionSettings(settings);
-      } catch (error) {
-        console.error('Failed to send session settings:', error);
-        toast.error('Failed to update conversation settings');
-      }
-    }
-  }, [currentConversation?.humeGroupId, currentConversation?.id, session?.user?.id, voiceClient]);
-
   return (
     <HumeVoiceProvider 
       auth={{ type: "accessToken", value: accessToken }}
-      resumedChatGroupId={currentConversation?.humeGroupId}
+      resumedChatGroupId={persistentChatId ?? currentConversation?.humeGroupId}
       configId={process.env.NEXT_PUBLIC_EVI_CONFIG_ID}
       onMessage={handleMessage}
       onError={(error) => {
@@ -152,3 +175,5 @@ export function VoiceContextProvider({ accessToken, children }: VoiceContextProp
     </HumeVoiceProvider>
   );
 }
+
+export default VoiceContextProvider;
