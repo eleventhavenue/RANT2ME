@@ -1,12 +1,16 @@
-// app/api/conversation/reset/route.ts
-import { auth } from "@/app/auth"
-import { prisma } from "@/lib/prisma"
-import { NextResponse } from "next/server"
+// app/api/conversation/reset/route.ts - Fix unused variable
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { NextResponse } from "next/server";
+import { ConversationStatus } from "@prisma/client";
 
 export async function POST() {
-  const session = await auth()
+  const session = await auth();
   if (!session?.user?.id) {
-    return new NextResponse("Unauthorized", { status: 401 })
+    return new NextResponse(
+      JSON.stringify({ error: "Unauthorized" }), 
+      { status: 401, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 
   try {
@@ -16,26 +20,37 @@ export async function POST() {
       await tx.conversation.updateMany({
         where: {
           userId: session.user.id,
-          status: 'ACTIVE'
+          status: ConversationStatus.ACTIVE
         },
         data: {
-          status: 'ARCHIVED'
+          status: ConversationStatus.ARCHIVED
         }
       });
 
       // Create new conversation
-      return await tx.conversation.create({
+      const newConv = await tx.conversation.create({
         data: {
           userId: session.user.id,
           humeGroupId: crypto.randomUUID(),
-          status: 'ACTIVE'
+          status: ConversationStatus.ACTIVE
         }
       });
+
+      // Update the user's lastActiveConversationId
+      await tx.user.update({
+        where: { id: session.user.id },
+        data: { lastActiveConversationId: newConv.id }
+      });
+
+      return newConv;
     });
 
     return NextResponse.json(newConversation);
   } catch (error) {
     console.error('[CONVERSATION_RESET_ERROR]', error);
-    return new NextResponse("Internal Error", { status: 500 });
+    return new NextResponse(
+      JSON.stringify({ error: "Failed to reset conversation" }), 
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 }

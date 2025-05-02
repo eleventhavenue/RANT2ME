@@ -1,5 +1,5 @@
-// app/login/page.tsx
-'use client';
+// app/login/page.tsx - Fix unused error variables
+"use client";
 
 import { signIn } from "next-auth/react";
 import { Chrome } from "lucide-react";
@@ -15,18 +15,18 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const error = searchParams.get("error");
+  const errorParam = searchParams.get("error");
   const callbackUrl = searchParams.get("callbackUrl") || "/";
 
   useEffect(() => {
-    if (error) {
+    if (errorParam) {
       toast.error(
-        error === "AccessDenied" 
+        errorParam === "AccessDenied" 
           ? "You don't have permission to sign in."
           : "There was an error signing in."
       );
     }
-  }, [error]);
+  }, [errorParam]);
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,14 +35,16 @@ export default function LoginPage() {
       const result = await signIn("credentials", {
         email,
         password,
-        redirect: true,
+        redirect: false,
         callbackUrl,
       });
       
       if (result?.error) {
         toast.error(result.error);
+      } else if (result?.url) {
+        router.push(result.url);
       }
-    } catch (error) {
+    } catch (err) {
       toast.error("Failed to sign in");
     } finally {
       setIsLoading(false);
@@ -56,7 +58,7 @@ export default function LoginPage() {
         callbackUrl,
         redirect: true,
       });
-    } catch (error) {
+    } catch (err) {
       toast.error("Failed to sign in with Google");
     } finally {
       setIsLoading(false);
@@ -143,7 +145,7 @@ export default function LoginPage() {
               href="/register" 
               className="text-sm text-purple-600 hover:text-purple-500 dark:text-purple-400 dark:hover:text-purple-300"
             >
-              Don't have an account? Sign up
+              Don&apos;t have an account? Sign up
             </Link>
           </div>
         </div>

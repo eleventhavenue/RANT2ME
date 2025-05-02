@@ -1,14 +1,13 @@
 // components/ClientComponent.tsx
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { VoiceContextProvider } from '@/contexts/VoiceContext';
 import Layout from "./Layout";
 import Messages from "./Messages";
 import Controls from "./Controls";
 import MoodTracker from "./MoodTracker";
 import { useSession } from "next-auth/react";
-
-const MOOD_TRACK_EVENT = 'show-mood-tracker';
+import { toast } from "react-hot-toast";
 
 function getGreeting(): string {
   const hour = new Date().getHours();
@@ -24,6 +23,34 @@ export default function ClientComponent({
 }) {
   const { data: session } = useSession();
   const [showMoodTracker, setShowMoodTracker] = useState(false);
+  
+  // Listen for the mood tracker event
+  useEffect(() => {
+    const handleMoodTrack = () => setShowMoodTracker(true);
+    window.addEventListener('show-mood-tracker', handleMoodTrack);
+    return () => window.removeEventListener('show-mood-tracker', handleMoodTrack);
+  }, []);
+
+  if (!accessToken) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-purple-50 to-white p-8">
+        <div className="max-w-md mx-auto mt-8 p-6 bg-white/80 backdrop-blur shadow-lg rounded-2xl border border-red-200">
+          <h2 className="text-lg font-semibold text-red-700 mb-2">Error</h2>
+          <p className="text-red-600">Failed to fetch access token. Please check your environment variables and try again.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-purple-50 to-white p-8">
+        <div className="max-w-md mx-auto mt-8 p-6 bg-white/80 backdrop-blur shadow-lg rounded-2xl">
+          <p className="text-center">Loading session...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Layout>
@@ -31,8 +58,7 @@ export default function ClientComponent({
         <div className="max-w-3xl mx-auto px-4">
           {/* Header Greeting */}
           <h1 className="text-4xl font-serif mb-12 flex items-center gap-3">
-            
-            {`${getGreeting()}, ${session?.user?.name?.split(' ')[0] || 'there'}`}
+            {`${getGreeting()}, ${session.user?.name?.split(' ')[0] || 'there'}`}
           </h1>
 
           {/* Main Chat Area */}
@@ -42,13 +68,34 @@ export default function ClientComponent({
             </h2>
             <div className="space-y-6">
               <Messages />
-              <Controls onMoodTrack={MOOD_TRACK_EVENT} />
+              <Controls onMoodTrack="show-mood-tracker" />
             </div>
           </div>
         </div>
         
         {showMoodTracker && (
-          <MoodTracker onClose={() => setShowMoodTracker(false)} />
+          <MoodTracker 
+            onClose={() => setShowMoodTracker(false)}
+            onSave={(mood) => {
+              fetch('/api/moods', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(mood)
+              })
+              .then(response => {
+                if (!response.ok) throw new Error('Failed to save mood');
+                return response.json();
+              })
+              .then(() => {
+                toast.success('Mood saved successfully');
+                setShowMoodTracker(false);
+              })
+              .catch(error => {
+                console.error('Error saving mood:', error);
+                toast.error('Failed to save your mood');
+              });
+            }}
+          />
         )}
       </VoiceContextProvider>
     </Layout>
